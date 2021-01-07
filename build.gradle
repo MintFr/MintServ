@@ -1,0 +1,39 @@
+plugins {
+    id 'java'
+    id 'application'
+//     id "org.springframework.boot" version "2.4.1"
+//     id 'io.spring.dependency-management' version '1.0.8.RELEASE'
+//     id 'war'
+}
+
+repositories {
+    maven { url "https://repo.osgeo.org/repository/release/" }
+    mavenCentral()
+}
+
+dependencies {
+    def geotools_version = '24.1'
+
+    // This dependency is used by the application.
+//     implementation 'com.google.guava:guava:28.1-jre'
+//     implementation 'org.springframework:spring-web:5.3.2'
+//     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation "org.geotools:gt-main:${geotools_version}"
+    implementation "org.geotools:gt-netcdf:${geotools_version}"
+
+    // Use JUnit test framework
+    testImplementation 'junit:junit:4.12'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+}
+
+application {
+    mainClass = 'fr.nantral.mint.App'
+}
+
+// Fix <http://www.slf4j.org/codes.html#log4jDelegationLoop>
+configurations {
+    compile.exclude module: 'log4j-over-slf4j'
+}
