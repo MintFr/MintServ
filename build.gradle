@@ -14,15 +14,22 @@ repositories {
 dependencies {
     def geotools_version = '24.1'
 
-    // This dependency is used by the application.
-//     implementation 'com.google.guava:guava:28.1-jre'
-//     implementation 'org.springframework:spring-web:5.3.2'
-//     implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation "org.geotools:gt-main:${geotools_version}"
-    implementation "org.geotools:gt-netcdf:${geotools_version}"
+    // PostgreSQL
+    implementation 'org.postgresql:postgresql:42.2.18'
+    // Command line arguments
+    implementation 'info.picocli:picocli:4.6.1'
+    annotationProcessor 'info.picocli:picocli-codegen:4.6.1'
+
+//     // Geotools
+//     implementation "org.geotools:gt-main:${geotools_version}"
+//     implementation "org.geotools:gt-netcdf:${geotools_version}"
 
     // Use JUnit test framework
     testImplementation 'junit:junit:4.12'
+}
+
+compileJava {
+    options.compilerArgs += ["-Aproject=${project.name}"]
 }
 
 java {
@@ -33,7 +40,14 @@ application {
     mainClass = 'fr.nantral.mint.App'
 }
 
-// Fix <http://www.slf4j.org/codes.html#log4jDelegationLoop>
-configurations {
-    compile.exclude module: 'log4j-over-slf4j'
+jar {
+    manifest {
+        attributes 'Main-Class': 'fr.nantral.mint.App'
+    }
 }
+
+// This was a Spring framework fix
+// // Fix <http://www.slf4j.org/codes.html#log4jDelegationLoop>
+// configurations {
+//     compile.exclude module: 'log4j-over-slf4j'
+// }

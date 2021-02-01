@@ -1,0 +1,3 @@
+database_url=jdbc:postgresql://DATABASE_HOST:DATABSE_PORT/DB_NAME
+username=YOUR_USERNAME
+password=YOUR_PASSWORD
