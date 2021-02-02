@@ -1,3 +1,7 @@
-database_url=jdbc:postgresql://DATABASE_HOST:DATABSE_PORT/DB_NAME
-username=YOUR_USERNAME
-password=YOUR_PASSWORD
+database_url = jdbc:postgresql://DB_HOST:DB_PORT/DB_NAME
+username = YOUR_USERNAME
+password = YOUR_PASSWORD
+#table_name = conc_raster
+
+model_py = model.py
+model_dir = /path/to/model

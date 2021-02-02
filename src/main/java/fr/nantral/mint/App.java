@@ -1,17 +1,17 @@
 package fr.nantral.mint;
 
 import picocli.CommandLine;
-import picocli.CommandLine.*;
+import picocli.CommandLine.Option;
 
 import java.io.*;
-import java.util.Properties;
+import java.nio.file.Path;
 import java.sql.*;
+import java.util.Properties;
 
-//import org.geotools.coverage.io.netcdf.NetCDFFormat;
-//import org.geotools.coverage.grid.GridCoverage2D;
-//import org.geotools.util.Arguments;
 
 public class App implements Runnable {
+
+    // === picocli configuration ===
 
     @Option(names = "--config", description = "The configuration file")
     File configFile = new File("config.properties");
@@ -19,67 +19,68 @@ public class App implements Runnable {
     @Option(names = "--file", required = true, description = "The netcdf file to import")
     File netcdfFile;
 
+    @Option(names ="--skip-model") boolean skipModel;
+    @Option(names ="--skip-connection", description = "Skip connecting to the database. This crashes the process") boolean skipConnection;
+
     public static void main(String... args) throws Exception {
         System.exit(new CommandLine(new App()).execute(args));
     }
 
+    // ---
+
     @Override
     public void run() {
-        Properties config = null;
         try {
-            config = readConfigurationFile();
-        } catch (IOException e) {
-            e.printStackTrace();
-            return;
-        }
-        Connection dbConnection = null;
-        try {
-            dbConnection = connectToDatabase(config);
-        } catch (SQLException throwables) {
-            throwables.printStackTrace();
-            return;
-        }
-
-        // DEBUG: Query some data and print it
-        try {
-            debugTestConnection(dbConnection);
-        } catch (SQLException throwables) {
-            throwables.printStackTrace();
-            return;
-        }
-
-        // FIXME hardcoded string
-        try {
-            importNetcdfIntoDatabase(dbConnection, netcdfFile.getPath());
+            fallibleRun();
         } catch (Exception e) {
             e.printStackTrace();
-            return;
-        }
-
-//        // GeoTools provides utility classes to parse command line arguments
-//        var processedArgs = new Arguments(args);
-//        var file = new File(processedArgs.getRequiredString("--file"));
-//
-//        var format = new NetCDFFormat();
-//        var reader = format.getReader(file);
-//        GridCoverage2D gridCoverage = reader.read(null);
-    }
-
-    // Sample code to test that the connection is working
-    private static void debugTestConnection(Connection dbConnection) throws SQLException {
-        var statement = dbConnection.createStatement();
-        var dbResult = statement.executeQuery("SELECT * FROM pg_tables");
-        var resultColumns = dbResult.getMetaData().getColumnCount();
-        while (dbResult.next()) {
-            String s = "";
-            for (int i = 1; i <= resultColumns; i++) {
-                s += dbResult.getString(i) + ",";
-            }
-            System.out.println(s);
         }
     }
 
-    Properties readConfigurationFile() throws IOException {
+    /** The main business logic */
+    private void fallibleRun() throws Exception {
+        Properties config = readConfigurationFile(configFile);
+
+        // TODO maybe check mandatory keys ?
+
+        // STEP 1: Run the model
+        if (!skipModel) {
+            var modelFilepath = config.getProperty("model_py");
+            runModel(modelFilepath);
+        }
+
+        // STEP 1.5: Connect to the database
+        Connection dbConnection = null;
+        if (!skipConnection) {
+            var username = config.getProperty("username");
+            var password = config.getProperty("password");
+            var dbUrl = config.getProperty("database_url", "jdbc:postgresql://localhost");
+            dbConnection = connectToDatabase(username, password, dbUrl);
+        }
+        var tableName = config.getProperty("raster_table", "conc_raster");
+
+        // STEP 2: Import the model output into the database
+
+        // Find model raster output directory
+        var modelWorkdir = config.getProperty("model_dir");
+        var rasterDir = Path.of(modelWorkdir)
+                .resolve("RESULT/GRILLE")
+                .toFile();
+        if (!rasterDir.exists()) {
+            throw new FileNotFoundException("Model raster directory doesn't exist: " + rasterDir);
+        }
+
+        // Import netcdf rasters
+        var rasterPaths = rasterDir.listFiles(x -> x.isFile() && x.getName().endsWith(".nc"));
+        for (var rasterPath: rasterPaths) {
+            NetcdfImporter.importIntoDatabase(dbConnection, tableName, rasterPath.toPath());
+        }
+
+        // STEP 3: Manipulate the rasters in the database
+        // TODO
+    }
+
+    static Properties readConfigurationFile(File configFile) throws IOException {
         try (FileInputStream contents = new FileInputStream(configFile)) {
             var properties = new Properties();
             properties.load(contents);
@@ -87,63 +88,33 @@ public class App implements Runnable {
         }
     }
 
-    public static Connection connectToDatabase(Properties config) throws SQLException {
-        // TODO make it less wonky if the fields don't exist
-        var username = config.getProperty("username");
-        var password = config.getProperty("password");
-        var dbUrl = config.getProperty("database_url");
-
-        try {
-            Class.forName("org.postgresql.Driver");
-            return DriverManager.getConnection(dbUrl, password, username);
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
+    /** Run the model's Python script
+     *
+     * @param config needed for the script's filename
+     * @throws ProcessExitException if the model fails
+     * @throws IOException if launching the process fails
+     * @throws InterruptedException if another thread interrupts while waiting for the process to finish
+     */
+    public static void runModel(String filepath) throws ProcessExitException, IOException, InterruptedException {
+        var cmd = new String[] {"python3", filepath};
+        var process = new ProcessBuilder(cmd)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start();
+        System.out.println("$ " + String.join(" ", cmd));
+        var exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new ProcessExitException(cmd, exitCode);
         }
-
-        return null;
     }
 
-    // Based on <https://robertwb.wordpress.com/2016/02/20/netcdf-data-and-postgis/>
-    public static void importNetcdfIntoDatabase(Connection dbConnection, String filename) throws Exception, IOException, InterruptedException {
-        // === Call raster2pgsql and write the output to a file ===
-
-        var tableName = "conc_raster"; // WARN hardcoded tablename
-        // cf. <https://docs.boundlessgeo.com/suite/1.1.1/dataadmin/pgGettingStarted/raster2pgsql.html>
-        //     <https://gis.stackexchange.com/questions/18254/loading-a-raster-into-a-postgis-2-0-database-on-windows>
-        //     <https://postgis.net/docs/using_raster_dataman.html>
-        // -s 2154 -> SRID:2154 which is Lambert-93 (hardcoded)
-        // -C -> Apply raster constraints. This is to register the raster properly (apparently ?)
-        // -I -> Create GiST index. (Recommended)
-        // -F -> Add a column with the filename
-        var cmd = new String[] {"raster2pgsql", "-I", "-C", "-F", "-s", "2154", "NETCDF:" + filename, tableName};
-
-        // NB We write the output to a file instead of keeping it in memory becayse it's easier to debug
-        var outputFile = new File(filename
-                .toLowerCase()
-                .replaceAll("[^a-z0-9_]", "_") // Keep lowercase letters, numbers and underscore
-                .replaceAll("_+", "_") // collapse consecutive underscores
-                .concat(".psql") // Add file extension
-        );
-
-        var process = new ProcessBuilder(cmd)
-                .redirectOutput(outputFile)
-                .redirectError(ProcessBuilder.Redirect.INHERIT) // Print error messages to stderr
-                .start();
-
-        process.info().commandLine().ifPresent(v -> System.out.println("$ " + v));
-
-        var exitStatus = process.waitFor();
-        if (exitStatus != 0) {
-            // Output file is created even if nothing is written to it
-            outputFile.delete();
-            throw new Exception("raster2pgsql failed"); // TODO make a better exception class
-        }
-        System.out.println("# raster2pgsql ran successfully");
-
-        // === Read the sql file and execute it ===
-
-        var importStatement = dbConnection.createStatement();
-        var importRasterSql = new String(new FileInputStream(outputFile).readAllBytes());
-        importStatement.execute(importRasterSql);
+    /** Create a database connection given $config
+     *
+     * @param config needed for database URL and authentication
+     * @throws ClassNotFoundException if the database connector is missing
+     * @throws SQLException if the database connection fails
+     */
+    public static Connection connectToDatabase(String username, String password, String dbUrl) throws SQLException, ClassNotFoundException {
+        Class.forName("org.postgresql.Driver");
+        return DriverManager.getConnection(dbUrl, password, username);
     }
 }
