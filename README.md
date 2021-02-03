@@ -1,12 +1,15 @@
 # MintServ
 
+Uses Java 11. Build the fatJar with `./gradlew shadowJar`.
+
 Copy `config.properties.template` to `config.properties` and edit it.\
 Then run the jar in the current directory: `java -jar build/libs/MintServ.jar`
 
 
 ## Developer notes
 
-- Maybe we should call a shell script instead of Python, since we're using a Python venv.
+- Assumes the postgis and postgis\_raster extensions are loaded.
+- Do we need to pass configuration to the model.sh / model.py or assume that it works on its own ?
 
 ### TODO
 

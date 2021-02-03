@@ -1,10 +1,12 @@
 plugins {
     id 'java'
     id 'application'
+    id "com.github.johnrengelman.shadow" version '6.1.0'
 }
 
 repositories {
     maven { url "https://repo.osgeo.org/repository/release/" }
+    jcenter()
     mavenCentral()
 }
 
@@ -36,7 +38,7 @@ java {
 }
 
 application {
-    mainClass = 'fr.nantral.mint.App'
+    mainClassName = 'fr.nantral.mint.App'
 }
 
 jar {

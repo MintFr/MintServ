@@ -19,8 +19,8 @@ public class App implements Runnable {
     @Option(names = "--file", required = true, description = "The netcdf file to import")
     File netcdfFile;
 
-    @Option(names ="--skip-model") boolean skipModel;
-    @Option(names ="--skip-connection", description = "Skip connecting to the database. This crashes the process") boolean skipConnection;
+    @Option(names ="--skip-model", description = "Skip launching the model. No netcdf files will be created") boolean skipModel;
+    @Option(names ="--skip-connection", description = "Skip connecting to the database. Crashes the process") boolean skipConnection;
 
     public static void main(String... args) throws Exception {
         System.exit(new CommandLine(new App()).execute(args));
@@ -45,7 +45,7 @@ public class App implements Runnable {
 
         // STEP 1: Run the model
         if (!skipModel) {
-            var modelFilepath = config.getProperty("model_py");
+            var modelFilepath = config.getProperty("model_sh");
             runModel(modelFilepath);
         }
 
@@ -71,13 +71,20 @@ public class App implements Runnable {
         }
 
         // Import netcdf rasters
-        var rasterPaths = rasterDir.listFiles(x -> x.isFile() && x.getName().endsWith(".nc"));
+        File[] rasterPaths = rasterDir.listFiles(x -> x.isFile() && x.getName().endsWith(".nc"));
         for (var rasterPath: rasterPaths) {
-            NetcdfImporter.importIntoDatabase(dbConnection, tableName, rasterPath.toPath());
+            DatabaseController.importIntoDatabase(dbConnection, tableName, rasterPath.toPath());
         }
 
         // STEP 3: Manipulate the rasters in the database
-        // TODO
+
+        // Create an array of the raster names (used in the database)
+        String[] rasterNames = new String[rasterPaths.length];
+        for (int i = 0; i < rasterPaths.length; i++) {
+            rasterNames[i] = rasterPaths[i].getName();
+        }
+
+        // TODO do calculations and manipulations
     }
 
     static Properties readConfigurationFile(File configFile) throws IOException {
@@ -88,19 +95,27 @@ public class App implements Runnable {
         }
     }
 
-    /** Run the model's Python script
+    /** Run the model's shell script
      *
-     * @param config needed for the script's filename
+     * @param filepath The script's path
      * @throws ProcessExitException if the model fails
      * @throws IOException if launching the process fails
      * @throws InterruptedException if another thread interrupts while waiting for the process to finish
      */
     public static void runModel(String filepath) throws ProcessExitException, IOException, InterruptedException {
-        var cmd = new String[] {"python3", filepath};
+        // Maybe add arguments
+        var cmd = new String[] {filepath};
         var process = new ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start();
         System.out.println("$ " + String.join(" ", cmd));
+
+        // Relay subprocess output prefixed with "model:"
+		var bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+		bufferedReader.lines().forEach(x -> System.out.println("model: " + x));
+
+		// NB this might block the stderr thread, or not...
+
         var exitCode = process.waitFor();
         if (exitCode != 0) {
             throw new ProcessExitException(cmd, exitCode);
@@ -109,7 +124,9 @@ public class App implements Runnable {
 
     /** Create a database connection given $config
      *
-     * @param config needed for database URL and authentication
+     * @param username database username
+     * @param password database password
+     * @param dbUrl database JDBC url
      * @throws ClassNotFoundException if the database connector is missing
      * @throws SQLException if the database connection fails
      */

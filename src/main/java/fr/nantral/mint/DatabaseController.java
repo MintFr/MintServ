@@ -4,7 +4,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.sql.*;
 
-public class NetcdfImporter {
+public class DatabaseController {
     // Based on <https://robertwb.wordpress.com/2016/02/20/netcdf-data-and-postgis/>
     /** Import a netcdf file into the database
      *
@@ -57,20 +57,27 @@ public class NetcdfImporter {
         }
 
         // === Read the sql file and execute it ===
+        try {
+            var importRasterSql = Files.readString(outputFile.toPath());
+            // Edit the SQL to return an rid. This is hackish, but should work properly
+            importRasterSql = importRasterSql.replace(filename + "');", filename + "') RETURNING rid;");
 
-        var importRasterSql = Files.readString(outputFile.toPath());
-        // Edit the SQL to return an rid. This is hackish, but should work properly
-        importRasterSql = importRasterSql.replace(filename + "');", filename + "') RETURNING rid;");
+            System.out.println("Importing " + filename + " using " + outputFile);
 
-        System.out.println("Importing into PostGIS: " + filename);
+            var importStatement = dbConnection.createStatement();
+            var importResult = importStatement.executeQuery(importRasterSql);
 
-        var importStatement = dbConnection.createStatement();
-        var importResult = importStatement.executeQuery(importRasterSql);
+            // TODO use the rowid to add metadata: time and chemical species
+            var rid = importResult.getString("rid");
+            // DEBUG
+            System.out.println("Inserted raster rowid is " + rid);
 
-        // TODO use the rowid to add metadata: time and chemical species
-         var rid = importResult.getString("rid");
-        // DEBUG
-        System.out.println("Inserted raster rowid is "+ rid);
+        } finally {
+            // Delete SQL command file
+            if (!outputFile.delete()) {
+                System.err.println("Failed to delete " + outputFile);
+            }
+        }
     }
 }
 

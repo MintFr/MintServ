@@ -3,5 +3,5 @@ username = YOUR_USERNAME
 password = YOUR_PASSWORD
 #table_name = conc_raster
 
-model_py = model.py
+model_sh = model.sh
 model_dir = /path/to/model
