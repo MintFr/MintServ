@@ -19,8 +19,9 @@ public class App implements Runnable {
     @Option(names = "--file", required = true, description = "The netcdf file to import")
     File netcdfFile;
 
-    @Option(names ="--skip-model", description = "Skip launching the model. No netcdf files will be created") boolean skipModel;
-    @Option(names ="--skip-connection", description = "Skip connecting to the database. Crashes the process") boolean skipConnection;
+    @Option(names = "--skip-model", description = "Skip launching the model. No netcdf files will be created") boolean skipModel;
+    @Option(names = "--skip-connection", description = "Skip connecting to the database. Crashes the process") boolean skipConnection;
+    @Option(names = "--model-args", defaultValue = "") String modelArgs;
 
     public static void main(String... args) throws Exception {
         System.exit(new CommandLine(new App()).execute(args));
@@ -46,7 +47,7 @@ public class App implements Runnable {
         // STEP 1: Run the model
         if (!skipModel) {
             var modelFilepath = config.getProperty("model_sh");
-            runModel(modelFilepath);
+            runModel(modelFilepath, modelArgs);
         }
 
         // STEP 1.5: Connect to the database
@@ -102,23 +103,23 @@ public class App implements Runnable {
      * @throws IOException if launching the process fails
      * @throws InterruptedException if another thread interrupts while waiting for the process to finish
      */
-    public static void runModel(String filepath) throws ProcessExitException, IOException, InterruptedException {
-        // Maybe add arguments
-        var cmd = new String[] {filepath};
-        var process = new ProcessBuilder(cmd)
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
-                .start();
+    public static void runModel(String filepath, String arguments) throws ProcessExitException, IOException, InterruptedException {
+        // Use Runtime.exec instead of ProcessBuilder to use shell splitting (needed for arguments)
+        var cmd = filepath + " " + arguments;
+        var process = Runtime.getRuntime().exec(cmd);
         System.out.println("$ " + String.join(" ", cmd));
 
-        // Relay subprocess output prefixed with "model:"
-		var bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-		bufferedReader.lines().forEach(x -> System.out.println("model: " + x));
-
-		// NB this might block the stderr thread, or not...
+        // Relay subprocess output
+        var stderrThread = new Thread(new ForwardStderr(process.getErrorStream(), "model_err: "));
+        var stdoutThread = new Thread(new ForwardStdout(process.getInputStream(), "model: "));
+        stderrThread.start();
+        stdoutThread.start();
 
         var exitCode = process.waitFor();
+        stderrThread.join();
+        stdoutThread.join();
         if (exitCode != 0) {
-            throw new ProcessExitException(cmd, exitCode);
+            throw new ProcessExitException(new String[] {cmd}, exitCode);
         }
     }
 
