@@ -17,7 +17,7 @@ public class DatabaseController {
      * @throws ProcessExitException if the process doesn't exit successfully
      * @throws InterruptedException if another thread interrupts while waiting for the subprocess to finish
      * */
-    public static void importIntoDatabase(Connection dbConnection, String tableName, Path filepath)
+    public static void importRaster(Connection dbConnection, String tableName, Path filepath)
             throws SQLException, IOException, ProcessExitException, InterruptedException
     {
         // === Call raster2pgsql and write the output to a file ===
@@ -60,17 +60,13 @@ public class DatabaseController {
         try {
             var importRasterSql = Files.readString(outputFile.toPath());
             // Edit the SQL to return an rid. This is hackish, but should work properly
+            // TODO remove because it doesn't work if we split the file
             importRasterSql = importRasterSql.replace(filename + "');", filename + "') RETURNING rid;");
 
             System.out.println("Importing " + filename + " using " + outputFile);
 
             var importStatement = dbConnection.createStatement();
             var importResult = importStatement.executeQuery(importRasterSql);
-
-            // TODO use the rowid to add metadata: time and chemical species
-            var rid = importResult.getString("rid");
-            // DEBUG
-            System.out.println("Inserted raster rowid is " + rid);
 
         } finally {
             // Delete SQL command file
@@ -79,6 +75,40 @@ public class DatabaseController {
             }
         }
     }
+
+    /** Compute the pollution indices from the rasters in the database.
+     *
+     * This function updates the values of the osm_ways.conc_* columns based on conc_raster.*
+     * and using a temporary table indice.
+     *
+     * See also resources/fr.nantral.mint/compute_pollution.sql
+     *
+     * @param dbConnection The database connection
+     * @param tableName The name of the raster table (must be "conc_raster")
+     * @throws SQLException if the SQL command fails
+     * @throws IOException if reading the resource file containing the SQL code fails
+     * @throws MintException if tableName is not "conc_raster"
+     */
+    public static void computePollution(
+            Connection dbConnection, String tableName,
+            String no2_filename, String o3_filename, String pm10_filename, String pm2p5_filename
+    ) throws SQLException, IOException, MintException {
+        if (!(tableName.equals("conc_raster"))) {
+            throw new MintException("The raster table name is actually hardcoded to be conc_raster");
+        }
+
+        // Slurp `compute_pollution.sql` into `sql`
+        String sql;
+        try (var inputStream = DatabaseController.class.getResourceAsStream("compute_pollution.sql")) {
+            sql = new String(inputStream.readAllBytes());
+        }
+
+        var importStatement = dbConnection.prepareStatement(sql);
+        importStatement.setString(1, no2_filename);
+        importStatement.setString(2, o3_filename);
+        importStatement.setString(3, pm10_filename);
+        importStatement.setString(4, pm2p5_filename);
+
+        importStatement.execute();
+    }
 }
-
-

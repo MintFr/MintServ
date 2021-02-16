@@ -6,7 +6,21 @@ import picocli.CommandLine.Option;
 import java.io.*;
 import java.nio.file.Path;
 import java.sql.*;
+import java.util.Arrays;
 import java.util.Properties;
+
+/**
+ * ## Raster naming scheme
+ *
+ * The model outputs netcdf rasters in `$modelDir/RESULT/GRILLE/` with the following naming scheme:
+ * ```raku
+ * regex species { 'NO2' | 'O3' | 'PM10' | 'PM25' }
+ * regex YYYYMMDDHH { <[0..9]> ** 10 } # Year, month, day, and hour
+ * regex filename { 'Conc_' <species> '_' <YYYYMMDDHH> '.nc' }
+ * ```
+ * For example, 'Conc_NO2_20210216.nc for NO2 raster for 2021-10-02 at 16:00:00.
+ *
+ */
 
 
 public class App implements Runnable {
@@ -60,32 +74,48 @@ public class App implements Runnable {
         }
         var tableName = config.getProperty("raster_table", "conc_raster");
 
-        // STEP 2: Import the model output into the database
+        // STEP 2: Import the model output rasters into the database
 
         // Find model raster output directory
         var modelWorkdir = config.getProperty("model_dir");
-        var rasterDir = Path.of(modelWorkdir)
-                .resolve("RESULT/GRILLE")
-                .toFile();
+        File rasterDir = Path.of(modelWorkdir).resolve("RESULT/GRILLE").toFile();
         if (!rasterDir.exists()) {
             throw new FileNotFoundException("Model raster directory doesn't exist: " + rasterDir);
         }
 
-        // Import netcdf rasters
-        File[] rasterPaths = rasterDir.listFiles(x -> x.isFile() && x.getName().endsWith(".nc"));
-        for (var rasterPath: rasterPaths) {
-            DatabaseController.importIntoDatabase(dbConnection, tableName, rasterPath.toPath());
-        }
+        // Choose the raster data time by looking at the files of one species (eg. NO2)
+        var rasterPaths = rasterDir.listFiles(x -> {
+            var name = x.getName();
+            return x.isFile() && name.startsWith("Conc_NO2") && name.endsWith(".nc");
+        });
+        // We take the 1st calculated step (ie. 2nd file) of the simulation
+        Arrays.sort(rasterPaths);
+        String raster_time = rasterPaths[1].getName()
+                // Remove prefix and suffix
+                .replace("Conc_NO2_", "")
+                .replace(".nc", "");
 
-        // STEP 3: Manipulate the rasters in the database
+        // The 4 raster filepaths (see § Raster naming scheme)
+        Path no2_raster = rasterDir.toPath().resolve("Conc_NO2_" + raster_time + ".nc");
+        Path o3_raster = rasterDir.toPath().resolve("Conc_O3_" + raster_time + ".nc");
+        Path pm10_raster = rasterDir.toPath().resolve("Conc_PM10_" + raster_time + ".nc");
+        Path pm2p5_raster = rasterDir.toPath().resolve("Conc_PM25_" + raster_time + ".nc");
 
-        // Create an array of the raster names (used in the database)
-        String[] rasterNames = new String[rasterPaths.length];
-        for (int i = 0; i < rasterPaths.length; i++) {
-            rasterNames[i] = rasterPaths[i].getName();
-        }
+        // Import the 4 rasters
+        DatabaseController.importRaster(dbConnection, tableName, no2_raster);
+        DatabaseController.importRaster(dbConnection, tableName, o3_raster);
+        DatabaseController.importRaster(dbConnection, tableName, pm10_raster);
+        DatabaseController.importRaster(dbConnection, tableName, pm2p5_raster);
 
-        // TODO do calculations and manipulations
+        // STEP 3: Compute the pollution indices using the raster data in the database
+
+        DatabaseController.computePollution(
+                dbConnection, tableName,
+                no2_raster.getFileName().toString(),
+                o3_raster.getFileName().toString(),
+                pm10_raster.getFileName().toString(),
+                pm2p5_raster.getFileName().toString()
+        );
     }
 
     static Properties readConfigurationFile(File configFile) throws IOException {
@@ -104,26 +134,27 @@ public class App implements Runnable {
      * @throws InterruptedException if another thread interrupts while waiting for the process to finish
      */
     public static void runModel(String filepath, String arguments) throws ProcessExitException, IOException, InterruptedException {
-        // Use Runtime.exec instead of ProcessBuilder to use shell splitting (needed for arguments)
         var cmd = filepath + " " + arguments;
-        var process = Runtime.getRuntime().exec(cmd);
         System.out.println("$ " + String.join(" ", cmd));
 
+        // Use Runtime.exec instead of ProcessBuilder to use shell splitting (needed for arguments)
+        var process = Runtime.getRuntime().exec(cmd);
         // Relay subprocess output
-        var stderrThread = new Thread(new ForwardStderr(process.getErrorStream(), "model_err: "));
-        var stdoutThread = new Thread(new ForwardStdout(process.getInputStream(), "model: "));
+        var stderrThread = new Thread(new ForwardStderr(process.getErrorStream(), "m_e: "));
+        var stdoutThread = new Thread(new ForwardStdout(process.getInputStream(), "m: "));
+
         stderrThread.start();
         stdoutThread.start();
-
         var exitCode = process.waitFor();
         stderrThread.join();
         stdoutThread.join();
+
         if (exitCode != 0) {
             throw new ProcessExitException(new String[] {cmd}, exitCode);
         }
     }
 
-    /** Create a database connection given $config
+    /** Create a database connection given credentials
      *
      * @param username database username
      * @param password database password

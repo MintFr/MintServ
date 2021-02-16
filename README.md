@@ -22,6 +22,4 @@ java -jar build/libs/MintServ.jar --file=data/Conc_NO2_2014010100.nc --model-arg
 
 ### TODO
 
-- Add raster metadata
-- Add raster manipulation and calculations
-- Check mandatory configuration keys
+- (Optional ?) Check mandatory configuration keys
