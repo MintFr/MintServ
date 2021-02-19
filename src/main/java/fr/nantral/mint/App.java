@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.Properties;
 
 /**
+ *
  * ## Raster naming scheme
  *
  * The model outputs netcdf rasters in `$modelDir/RESULT/GRILLE/` with the following naming scheme:
@@ -18,20 +19,14 @@ import java.util.Properties;
  * regex YYYYMMDDHH { <[0..9]> ** 10 } # Year, month, day, and hour
  * regex filename { 'Conc_' <species> '_' <YYYYMMDDHH> '.nc' }
  * ```
- * For example, 'Conc_NO2_20210216.nc for NO2 raster for 2021-10-02 at 16:00:00.
- *
+ * For example, 'Conc_NO2_20210216.nc' for the NO2 raster of 2021-10-02 at 16:00:00.
  */
-
-
 public class App implements Runnable {
 
     // === picocli configuration ===
 
     @Option(names = "--config", description = "The configuration file")
     File configFile = new File("config.properties");
-
-    @Option(names = "--file", required = true, description = "The netcdf file to import")
-    File netcdfFile;
 
     @Option(names = "--skip-model", description = "Skip launching the model. No netcdf files will be created") boolean skipModel;
     @Option(names = "--skip-connection", description = "Skip connecting to the database. Crashes the process") boolean skipConnection;
@@ -52,11 +47,12 @@ public class App implements Runnable {
         }
     }
 
+
     /** The main business logic */
     private void fallibleRun() throws Exception {
         Properties config = readConfigurationFile(configFile);
 
-        // TODO maybe check mandatory keys ?
+        // TODO maybe check mandatory keys in configuration file ?
 
         // STEP 1: Run the model
         if (!skipModel) {
@@ -77,7 +73,7 @@ public class App implements Runnable {
         // STEP 2: Import the model output rasters into the database
 
         // Find model raster output directory
-        var modelWorkdir = config.getProperty("model_dir");
+        var modelWorkdir = config.getProperty("sirane_dir");
         File rasterDir = Path.of(modelWorkdir).resolve("RESULT/GRILLE").toFile();
         if (!rasterDir.exists()) {
             throw new FileNotFoundException("Model raster directory doesn't exist: " + rasterDir);
@@ -118,6 +114,14 @@ public class App implements Runnable {
         );
     }
 
+
+    /** Read the configuration properties from the file
+     *
+     * @param configFile
+     * @return the Properties object
+     *
+     * @throws IOException if opening the file fails
+     */
     static Properties readConfigurationFile(File configFile) throws IOException {
         try (FileInputStream contents = new FileInputStream(configFile)) {
             var properties = new Properties();
@@ -126,25 +130,28 @@ public class App implements Runnable {
         }
     }
 
-    /** Run the model's shell script
+
+    /** Run the model's shell script and relay its output
      *
-     * @param filepath The script's path
+     * @param filepath The script's path (shell escaped)
+     * @param arguments The script's arguments as a single string (subject to shell splitting)
+     *
      * @throws ProcessExitException if the model fails
      * @throws IOException if launching the process fails
      * @throws InterruptedException if another thread interrupts while waiting for the process to finish
      */
     public static void runModel(String filepath, String arguments) throws ProcessExitException, IOException, InterruptedException {
         var cmd = filepath + " " + arguments;
-        System.out.println("$ " + String.join(" ", cmd));
 
         // Use Runtime.exec instead of ProcessBuilder to use shell splitting (needed for arguments)
+        // also relay subprocess output prefixed with "m:" or "m_e:"
+        System.out.println("$ " + cmd);
         var process = Runtime.getRuntime().exec(cmd);
-        // Relay subprocess output
         var stderrThread = new Thread(new ForwardStderr(process.getErrorStream(), "m_e: "));
         var stdoutThread = new Thread(new ForwardStdout(process.getInputStream(), "m: "));
-
         stderrThread.start();
         stdoutThread.start();
+        
         var exitCode = process.waitFor();
         stderrThread.join();
         stdoutThread.join();
@@ -154,11 +161,13 @@ public class App implements Runnable {
         }
     }
 
+
     /** Create a database connection given credentials
      *
      * @param username database username
      * @param password database password
      * @param dbUrl database JDBC url
+     *
      * @throws ClassNotFoundException if the database connector is missing
      * @throws SQLException if the database connection fails
      */

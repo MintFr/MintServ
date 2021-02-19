@@ -50,55 +50,60 @@ DELETE FROM indice WHERE val_pm2p5 IS NULL;
 ALTER TABLE indice
  ADD COLUMN indice_gen double precision;
 UPDATE indice
+   -- NB If we need to store the concentrations, we'll need to assign the indices in new columns
+   --    (to keep the concentration values)
    SET val_no2 =
            (CASE
-            WHEN       val_no2 <= 40  THEN val_no2 = 1
-            WHEN 40  < val_no2 <= 90  THEN val_no2 = 2
-            WHEN 90  < val_no2 <= 120 THEN val_no2 = 3
-            WHEN 120 < val_no2 <= 230 THEN val_no2 = 4
-            WHEN 230 < val_no2 <= 340 THEN val_no2 = 5
-            WHEN 340 < val_no2        THEN val_no2 = 6
+            WHEN       val_no2 <= 40  THEN 1
+            WHEN 40  < val_no2 <= 90  THEN 2
+            WHEN 90  < val_no2 <= 120 THEN 3
+            WHEN 120 < val_no2 <= 230 THEN 4
+            WHEN 230 < val_no2 <= 340 THEN 5
+            WHEN 340 < val_no2        THEN 6
             ELSE val_no2
             END),
    SET val_o3 =
-            (CASE
-            WHEN       val_o3 <= 50  THEN val_o3 = 1
-            WHEN 50  < val_o3 <= 100 THEN val_o3 = 2
-            WHEN 100 < val_o3 <= 130 THEN val_o3 = 3
-            WHEN 130 < val_o3 <= 240 THEN val_o3 = 4
-            WHEN 240 < val_o3 <= 380 THEN val_o3 = 5
-            WHEN 380 < val_o3        THEN val_o3 = 6
+           (CASE
+            WHEN       val_o3 <= 50  THEN 1
+            WHEN 50  < val_o3 <= 100 THEN 2
+            WHEN 100 < val_o3 <= 130 THEN 3
+            WHEN 130 < val_o3 <= 240 THEN 4
+            WHEN 240 < val_o3 <= 380 THEN 5
+            WHEN 380 < val_o3        THEN 6
             ELSE val_o3
             END),
    SET val_pm10 =
-            (CASE
-            WHEN       val_pm10 <= 20  THEN val_pm10 = 1
-            WHEN 20  < val_pm10 <= 40  THEN val_pm10 = 2
-            WHEN 40  < val_pm10 <= 50  THEN val_pm10 = 3
-            WHEN 50  < val_pm10 <= 100 THEN val_pm10 = 4
-            WHEN 100 < val_pm10 <= 150 THEN val_pm10 = 5
-            WHEN 150 < val_pm10        THEN val_pm10 = 6
+           (CASE
+            WHEN       val_pm10 <= 20  THEN 1
+            WHEN 20  < val_pm10 <= 40  THEN 2
+            WHEN 40  < val_pm10 <= 50  THEN 3
+            WHEN 50  < val_pm10 <= 100 THEN 4
+            WHEN 100 < val_pm10 <= 150 THEN 5
+            WHEN 150 < val_pm10        THEN 6
             ELSE val_pm10
             END),
    SET val_pm2p5 =
             (CASE
-             WHEN      val_pm2p5 <= 10 THEN val_pm2p5 = 1
-             WHEN 10 < val_pm2p5 <= 20 THEN val_pm2p5 = 2
-             WHEN 20 < val_pm2p5 <= 25 THEN val_pm2p5 = 3
-             WHEN 25 < val_pm2p5 <= 50 THEN val_pm2p5 = 4
-             WHEN 50 < val_pm2p5 <= 75 THEN val_pm2p5 = 5
-             WHEN 75 < val_pm2p5       THEN val_pm2p5 = 6
+             WHEN      val_pm2p5 <= 10 THEN 1
+             WHEN 10 < val_pm2p5 <= 20 THEN 2
+             WHEN 20 < val_pm2p5 <= 25 THEN 3
+             WHEN 25 < val_pm2p5 <= 50 THEN 4
+             WHEN 50 < val_pm2p5 <= 75 THEN 5
+             WHEN 75 < val_pm2p5       THEN 6
              ELSE val_pm2p5
              END),
-   SET indice_gen
+   SET val_gen
              SELECT MAX(val_no2, val_o3, val_pm10, val_pm2p5)
                FROM indice;
 
 -- Ajout des indices à chaque tronçon d'OSM (colonnes osm_ways.conc_*)
 UPDATE osm_ways
+   -- TODO maybe rename columns
+   -- TODO maybe also store concentration values
    SET conc_no2   = val_no2,
        conc_o3    = val_o3,
        conc_pm10  = val_pm10,
-       conc_pm2p5 = val_pm2p5
+       conc_pm2p5 = val_pm2p5,
+       conc_gen = val_gen
   FROM indice
  WHERE osm_ways.osm_id = indice.osm_id;
