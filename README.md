@@ -33,15 +33,7 @@ its location in the documentation.
 - Add an entry to the crontab to run this command every 15 minutes:\
   `/path/to/jdk11/bin/java -jar /path/to/MintServ-all.jar <args>`
   
-For convenience, here's the commands to create the tarball:
-```sh
-./gradlew shadowJar
-mkdir -p tar
-cp build/libs/MintServ-all.jar tar/
-cp config.properties tar/
-cd tar
-tar cf MintServ.tar MintServ-all.jar config.properties
-```
+To create a tarball, just launch `build-tar.sh`.
 
 ## Developer notes
 

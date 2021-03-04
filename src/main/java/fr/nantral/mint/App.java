@@ -5,6 +5,7 @@ import picocli.CommandLine.Option;
 
 import java.io.*;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.*;
 import java.util.Arrays;
 import java.util.Properties;
@@ -30,6 +31,7 @@ public class App implements Runnable {
 
     @Option(names = "--skip-model", description = "Skip launching the model. No netcdf files will be created") boolean skipModel;
     @Option(names = "--skip-connection", description = "Skip connecting to the database. Crashes the process") boolean skipConnection;
+    @Option(names = "--skip-import", description = "Skip importing the netcdf files into the database. Probably crashes the process") boolean skipImport;
     @Option(names = "--model-args", defaultValue = "") String modelArgs;
 
     public static void main(String... args) throws Exception {
@@ -71,37 +73,40 @@ public class App implements Runnable {
         var tableName = config.getProperty("raster_table", "conc_raster");
 
         // STEP 2: Import the model output rasters into the database
+        Path no2_raster, o3_raster, pm10_raster, pm2p5_raster;
+        no2_raster = o3_raster = pm10_raster = pm2p5_raster = Paths.get("missing");
+        if (!skipImport) {
+            // Find model raster output directory
+            var modelWorkdir = config.getProperty("sirane_dir");
+            File rasterDir = Path.of(modelWorkdir).resolve("RESULT/GRILLE").toFile();
+            if (!rasterDir.exists()) {
+                throw new FileNotFoundException("Model raster directory doesn't exist: " + rasterDir);
+            }
 
-        // Find model raster output directory
-        var modelWorkdir = config.getProperty("sirane_dir");
-        File rasterDir = Path.of(modelWorkdir).resolve("RESULT/GRILLE").toFile();
-        if (!rasterDir.exists()) {
-            throw new FileNotFoundException("Model raster directory doesn't exist: " + rasterDir);
+            // Choose the raster data time by looking at the files of one species (eg. NO2)
+            var rasterPaths = rasterDir.listFiles(x -> {
+                var name = x.getName();
+                return x.isFile() && name.startsWith("Conc_NO2") && name.endsWith(".nc");
+            });
+            // We take the 0th calculated step (ie. 1st file) of the simulation
+            Arrays.sort(rasterPaths);
+            String raster_time = rasterPaths[0].getName()
+                    // Remove prefix and suffix
+                    .replace("Conc_NO2_", "")
+                    .replace(".nc", "");
+
+            // The 4 raster filepaths (see § Raster naming scheme)
+            no2_raster = rasterDir.toPath().resolve("Conc_NO2_" + raster_time + ".nc");
+            o3_raster = rasterDir.toPath().resolve("Conc_O3_" + raster_time + ".nc");
+            pm10_raster = rasterDir.toPath().resolve("Conc_PM10_" + raster_time + ".nc");
+            pm2p5_raster = rasterDir.toPath().resolve("Conc_PM25_" + raster_time + ".nc");
+
+            // Import the 4 rasters
+            DatabaseController.importRaster(dbConnection, tableName, no2_raster);
+            DatabaseController.importRaster(dbConnection, tableName, o3_raster);
+            DatabaseController.importRaster(dbConnection, tableName, pm10_raster);
+            DatabaseController.importRaster(dbConnection, tableName, pm2p5_raster);
         }
-
-        // Choose the raster data time by looking at the files of one species (eg. NO2)
-        var rasterPaths = rasterDir.listFiles(x -> {
-            var name = x.getName();
-            return x.isFile() && name.startsWith("Conc_NO2") && name.endsWith(".nc");
-        });
-        // We take the 1st calculated step (ie. 2nd file) of the simulation
-        Arrays.sort(rasterPaths);
-        String raster_time = rasterPaths[1].getName()
-                // Remove prefix and suffix
-                .replace("Conc_NO2_", "")
-                .replace(".nc", "");
-
-        // The 4 raster filepaths (see § Raster naming scheme)
-        Path no2_raster = rasterDir.toPath().resolve("Conc_NO2_" + raster_time + ".nc");
-        Path o3_raster = rasterDir.toPath().resolve("Conc_O3_" + raster_time + ".nc");
-        Path pm10_raster = rasterDir.toPath().resolve("Conc_PM10_" + raster_time + ".nc");
-        Path pm2p5_raster = rasterDir.toPath().resolve("Conc_PM25_" + raster_time + ".nc");
-
-        // Import the 4 rasters
-        DatabaseController.importRaster(dbConnection, tableName, no2_raster);
-        DatabaseController.importRaster(dbConnection, tableName, o3_raster);
-        DatabaseController.importRaster(dbConnection, tableName, pm10_raster);
-        DatabaseController.importRaster(dbConnection, tableName, pm2p5_raster);
 
         // STEP 3: Compute the pollution indices using the raster data in the database
 
@@ -173,6 +178,6 @@ public class App implements Runnable {
      */
     public static Connection connectToDatabase(String username, String password, String dbUrl) throws SQLException, ClassNotFoundException {
         Class.forName("org.postgresql.Driver");
-        return DriverManager.getConnection(dbUrl, password, username);
+        return DriverManager.getConnection(dbUrl, username, password);
     }
 }
