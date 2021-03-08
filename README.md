@@ -43,4 +43,3 @@ To create a tarball, just launch `build-tar.sh`.
 ### TODO
 
 - (Optional ?) Check mandatory configuration keys
-- Check if postgresql jdbc is needed

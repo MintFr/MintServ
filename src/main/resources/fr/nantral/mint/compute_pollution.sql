@@ -1,10 +1,15 @@
--- Given rasters in conc_raster, compute the pollution indices as val_* columns in osm_ways
+-- Given rasters in conc_raster, compute the pollution indices as val_* columns in ways
 -- Input 1 -> NO2 raster filename
 --       2 -> O3 raster filename
 --       3 -> PM10 raster filename
 --       4 -> PM2.5 raster filename
 
--- Création de tables conc_*_proj avec les raster dans la même projection qu'osm_ways (SRID:4326)
+-- Suppression des tables conc_*_proj pour les recréer ensuite
+  DROP TABLE IF EXISTS conc_proj_no2;
+  DROP TABLE IF EXISTS conc_proj_o3;
+  DROP TABLE IF EXISTS conc_proj_pm10;
+  DROP TABLE IF EXISTS conc_proj_pm2p5;
+-- Création de tables conc_*_proj avec les raster dans la même projection que ways (SRID:4326)
 CREATE TABLE conc_proj_no2
    AS SELECT ST_Transform(rast, 4326) AS rast_no2
         FROM conc_raster
@@ -23,7 +28,7 @@ CREATE TABLE conc_proj_pm2p5;
        WHERE filename = ?; -- Insert pm2.5 filename
 
 -- Création d'une table `indice` pour les concentrations et le calcul des indices
-  DROP TABLE indice;
+  DROP TABLE IF EXISTS indice;
 CREATE TABLE indice
    AS SELECT osm_id,
              -- On récupère la valeur du raster correspondant au milieu de chaque way
@@ -31,7 +36,7 @@ CREATE TABLE indice
              ST_Value(rast_o3,    ST_Centroid(the_geom)) AS val_o3,
              ST_Value(rast_pm10,  ST_Centroid(the_geom)) AS val_pm10,
              ST_Value(rast_pm2p5, ST_Centroid(the_geom)) AS val_pm2p5
-        FROM osm_ways,
+        FROM ways,
              conc_proj_no2,
              conc_proj_o3,
              conc_proj_pm10,
@@ -41,9 +46,9 @@ CREATE TABLE indice
          AND ST_Intersects(the_geom, rast_pm10)
          AND ST_Intersects(the_geom, rast_pm2p5);
 -- Suppression des valeurs nulles
-DELETE FROM indice WHERE val_no2 IS NULL;
-DELETE FROM indice WHERE val_o3 IS NULL;
-DELETE FROM indice WHERE val_pm10 IS NULL;
+DELETE FROM indice WHERE val_no2   IS NULL;
+DELETE FROM indice WHERE val_o3    IS NULL;
+DELETE FROM indice WHERE val_pm10  IS NULL;
 DELETE FROM indice WHERE val_pm2p5 IS NULL;
 
 -- Calcul des indices (colonnes indice.val_* et indice.indice_gen)
@@ -92,18 +97,26 @@ UPDATE indice
              WHEN 75 < val_pm2p5       THEN 6
              ELSE val_pm2p5
              END),
-   SET val_gen
+   SET val_gen =
              SELECT MAX(val_no2, val_o3, val_pm10, val_pm2p5)
                FROM indice;
 
--- Ajout des indices à chaque tronçon d'OSM (colonnes osm_ways.conc_*)
-UPDATE osm_ways
+-- Add columns to ways if they don't exist yet
+ALTER TABLE ways
+ ADD COLUMN IF NOT EXISTS conc_no2   double precision,
+ ADD COLUMN IF NOT EXISTS conc_o3    double precision,
+ ADD COLUMN IF NOT EXISTS conc_pm10  double precision,
+ ADD COLUMN IF NOT EXISTS conc_pm2p5 double precision,
+ ADD COLUMN IF NOT EXISTS conc_gen   double precision;
+
+-- Ajout des indices à chaque tronçon d'OSM (colonnes ways.conc_*)
+UPDATE ways
    -- TODO maybe rename columns
    -- TODO maybe also store concentration values
    SET conc_no2   = val_no2,
        conc_o3    = val_o3,
        conc_pm10  = val_pm10,
        conc_pm2p5 = val_pm2p5,
-       conc_gen = val_gen
+       conc_gen   = val_gen
   FROM indice
- WHERE osm_ways.osm_id = indice.osm_id;
+ WHERE ways.osm_id = indice.osm_id;
