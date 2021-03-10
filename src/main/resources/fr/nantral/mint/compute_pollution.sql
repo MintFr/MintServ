@@ -14,28 +14,28 @@ CREATE TABLE conc_proj_no2
    AS SELECT ST_Transform(rast, 4326) AS rast_no2
         FROM conc_raster
        WHERE filename = ?; -- Insert no2 filename
-CREATE TABLE conc_proj_o3;
+CREATE TABLE conc_proj_o3
    AS SELECT ST_Transform(rast, 4326) AS rast_o3
-        FROM conc_raster;
+        FROM conc_raster
        WHERE filename = ?; -- Insert o3 filename
-CREATE TABLE conc_proj_pm10;
+CREATE TABLE conc_proj_pm10
    AS SELECT ST_Transform(rast, 4326) AS rast_pm10
-        FROM conc_raster;
+        FROM conc_raster
        WHERE filename = ?; -- Insert pm10 filename
-CREATE TABLE conc_proj_pm2p5;
+CREATE TABLE conc_proj_pm2p5
    AS SELECT ST_Transform(rast, 4326) AS rast_pm2p5
-        FROM conc_raster;
+        FROM conc_raster
        WHERE filename = ?; -- Insert pm2.5 filename
 
 -- Création d'une table `indice` pour les concentrations et le calcul des indices
   DROP TABLE IF EXISTS indice;
 CREATE TABLE indice
    AS SELECT osm_id,
-             -- On récupère la valeur du raster correspondant au milieu de chaque way
-             ST_Value(rast_no2,   ST_Centroid(the_geom)) AS val_no2,
-             ST_Value(rast_o3,    ST_Centroid(the_geom)) AS val_o3,
-             ST_Value(rast_pm10,  ST_Centroid(the_geom)) AS val_pm10,
-             ST_Value(rast_pm2p5, ST_Centroid(the_geom)) AS val_pm2p5
+             -- On récupère le maximum des valeurs du rasteur autour du milieu de chaque way
+             ST_Max4ma(ST_Neighborhood(rast_no2,   ST_Centroid(the_geom), 1, 1), NULL) AS val_no2,
+             ST_Max4ma(ST_Neighborhood(rast_o3,    ST_Centroid(the_geom), 1, 1), NULL) AS val_o3,
+             ST_Max4ma(ST_Neighborhood(rast_pm10,  ST_Centroid(the_geom), 1, 1), NULL) AS val_pm10,
+             ST_Max4ma(ST_Neighborhood(rast_pm2p5, ST_Centroid(the_geom), 1, 1), NULL) AS val_pm2p5
         FROM ways,
              conc_proj_no2,
              conc_proj_o3,
@@ -45,12 +45,21 @@ CREATE TABLE indice
          AND ST_Intersects(the_geom, rast_o3)
          AND ST_Intersects(the_geom, rast_pm10)
          AND ST_Intersects(the_geom, rast_pm2p5);
--- Suppression des valeurs nulles
-DELETE FROM indice WHERE val_no2   IS NULL;
-DELETE FROM indice WHERE val_o3    IS NULL;
-DELETE FROM indice WHERE val_pm10  IS NULL;
-DELETE FROM indice WHERE val_pm2p5 IS NULL;
+-- Remplacement des valeurs nulles par la concentration de fond (qui correspond au minimum de concentration)
+UPDATE indice
+   SET val_no2 = (SELECT MIN(val_no2) FROM indice)
+ WHERE val_no2 IS NULL;
+UPDATE indice
+   SET val_o3 = (SELECT MIN(val_o3) FROM indice)
+ WHERE val_o3 IS NULL;
+UPDATE indice
+   SET val_pm10 = (SELECT MIN(val_pm10) FROM indice)
+ WHERE val_pm10 IS NULL;
+UPDATE indice
+   SET val_pm2p5 = (SELECT MIN(val_pm2p5) FROM indice)
+ WHERE val_pm2p5 IS NULL;
 
+/* The index calculation is currently being rethinked
 -- Calcul des indices (colonnes indice.val_* et indice.indice_gen)
 ALTER TABLE indice
  ADD COLUMN indice_gen double precision;
@@ -100,14 +109,14 @@ UPDATE indice
    SET val_gen =
              SELECT MAX(val_no2, val_o3, val_pm10, val_pm2p5)
                FROM indice;
+*/
 
 -- Add columns to ways if they don't exist yet
 ALTER TABLE ways
  ADD COLUMN IF NOT EXISTS conc_no2   double precision,
  ADD COLUMN IF NOT EXISTS conc_o3    double precision,
  ADD COLUMN IF NOT EXISTS conc_pm10  double precision,
- ADD COLUMN IF NOT EXISTS conc_pm2p5 double precision,
- ADD COLUMN IF NOT EXISTS conc_gen   double precision;
+ ADD COLUMN IF NOT EXISTS conc_pm2p5 double precision;
 
 -- Ajout des indices à chaque tronçon d'OSM (colonnes ways.conc_*)
 UPDATE ways
@@ -116,7 +125,6 @@ UPDATE ways
    SET conc_no2   = val_no2,
        conc_o3    = val_o3,
        conc_pm10  = val_pm10,
-       conc_pm2p5 = val_pm2p5,
-       conc_gen   = val_gen
+       conc_pm2p5 = val_pm2p5
   FROM indice
  WHERE ways.osm_id = indice.osm_id;
