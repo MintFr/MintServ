@@ -1,5 +1,8 @@
 # MintServ
 
+# Caution
+**This repo was used during the first year, and is using the software SIRANE. We did not use this software this year.**
+
 The server launcher that is responsible for launching the pollution model,
 import its output into the PostGIS database, and compute the pollution index. 
 
